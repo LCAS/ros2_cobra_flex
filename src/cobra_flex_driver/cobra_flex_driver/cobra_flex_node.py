@@ -207,7 +207,7 @@ class CobraFlexDriver(Node):
         left_rpm = (v_left / (2 * math.pi * self.WHEEL_RADIUS)) * 60.0
         right_rpm = (v_right / (2 * math.pi * self.WHEEL_RADIUS)) * 60.0
         
-        # Convert to 0.1rpm units as per protocol (range: 0-1800 means 0-180 rpm)
+        # Convert to 0.1rpm units as per protocol (range: -1800 to 1800 means -180 to 180 rpm)
         left_speed = int(left_rpm * 10)
         right_speed = int(right_rpm * 10)
         
@@ -306,10 +306,13 @@ class CobraFlexDriver(Node):
                     m3_rpm = data.get("M3", 0) / 10.0
                     m4_rpm = data.get("M4", 0) / 10.0
                     
+                    # Assign to wheel velocities matching joint state order:
+                    # [0] = front_left (M1), [1] = front_right (M2), 
+                    # [2] = rear_left (M4), [3] = rear_right (M3)
                     self.robot_state.wheel_velocities[0] = (m1_rpm / 60.0) * 2 * math.pi
                     self.robot_state.wheel_velocities[1] = (m2_rpm / 60.0) * 2 * math.pi
-                    self.robot_state.wheel_velocities[2] = (m3_rpm / 60.0) * 2 * math.pi
-                    self.robot_state.wheel_velocities[3] = (m4_rpm / 60.0) * 2 * math.pi
+                    self.robot_state.wheel_velocities[2] = (m4_rpm / 60.0) * 2 * math.pi  # rear left
+                    self.robot_state.wheel_velocities[3] = (m3_rpm / 60.0) * 2 * math.pi  # rear right
                 
                 # Parse odometry data (odl, odr) in cm
                 if "odl" in data and "odr" in data:
@@ -317,14 +320,20 @@ class CobraFlexDriver(Node):
                     odr_cm = data["odr"]
                     # Convert cm to meters and then to wheel positions in radians
                     # position_rad = distance_m / wheel_radius
-                    self.robot_state.wheel_positions[0] = (odl_cm / 100.0) / self.WHEEL_RADIUS  # left front
-                    self.robot_state.wheel_positions[1] = (odr_cm / 100.0) / self.WHEEL_RADIUS  # right front
-                    self.robot_state.wheel_positions[2] = (odr_cm / 100.0) / self.WHEEL_RADIUS  # right rear
-                    self.robot_state.wheel_positions[3] = (odl_cm / 100.0) / self.WHEEL_RADIUS  # left rear
+                    # odl = left wheel distance, odr = right wheel distance
+                    # Assign to match joint state order:
+                    # [0] = front_left (left), [1] = front_right (right),
+                    # [2] = rear_left (left), [3] = rear_right (right)
+                    self.robot_state.wheel_positions[0] = (odl_cm / 100.0) / self.WHEEL_RADIUS  # front left
+                    self.robot_state.wheel_positions[1] = (odr_cm / 100.0) / self.WHEEL_RADIUS  # front right
+                    self.robot_state.wheel_positions[2] = (odl_cm / 100.0) / self.WHEEL_RADIUS  # rear left
+                    self.robot_state.wheel_positions[3] = (odr_cm / 100.0) / self.WHEEL_RADIUS  # rear right
                 
-                # Parse battery voltage
+                # Parse battery voltage (unit may vary by firmware version)
                 if "v" in data:
-                    self.robot_state.battery_voltage = data["v"] / 100.0  # Convert to volts if needed
+                    # Assuming the value is in decivolts or similar small unit
+                    # Example: v=1173 represents 11.73V
+                    self.robot_state.battery_voltage = data["v"] / 100.0
                 
                 self.update_odometry()
             

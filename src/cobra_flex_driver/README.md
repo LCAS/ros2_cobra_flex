@@ -181,8 +181,8 @@ Controls left and right wheel speeds.
 ```json
 {
   "T": 1,
-  "L": 100,    // Left wheel speed in 0.1rpm units (0-1800, positive=forward)
-  "R": 100     // Right wheel speed in 0.1rpm units (0-1800, positive=forward)
+  "L": 100,    // Left wheel speed in 0.1rpm units (-1800 to 1800, positive=forward, negative=backward)
+  "R": 100     // Right wheel speed in 0.1rpm units (-1800 to 1800, positive=forward, negative=backward)
 }
 ```
 
