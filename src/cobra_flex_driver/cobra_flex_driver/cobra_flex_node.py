@@ -9,7 +9,16 @@ A ROS2 node for the Waveshare Cobra Flex chassis that:
 - Publishes /imu for IMU data
 - Publishes /joint_states for wheel states
 
+Uses Waveshare JSON protocol:
+- T=1: Movement command (L, R wheel speeds in 0.1rpm units)
+- T=11: Individual motor control (M1-M4 in 0.1rpm units)
+- T=130: Request feedback
+- T=131: Continuous feedback control
+- T=132: LED brightness control
+- T=1001: Feedback response (M1-M4, odl, odr, v)
+
 Based on Waveshare UGV architecture and JSON protocol.
+Reference: https://www.waveshare.com/wiki/Cobra_Flex#JSON_Communication_Protocol
 
 Author: L-CAS, University of Lincoln
 License: GPL-3.0
@@ -160,12 +169,12 @@ class CobraFlexDriver(Node):
     
     def send_robot_config(self):
         """Send initial robot configuration to ESP32"""
-        config_cmd = {
-            "T": 900,  # Configuration command
-            "main": self.ROBOT_TYPE_COBRA_FLEX,
-            "module": self.MODULE_NONE
-        }
-        self.send_json_command(config_cmd)
+        # Enable continuous feedback mode
+        self.set_continuous_feedback(True)
+        time.sleep(0.1)  # Small delay between commands
+        
+        # Request initial feedback
+        self.request_feedback()
     
     def send_json_command(self, command: Dict[str, Any]) -> bool:
         """Send JSON command to ESP32"""
@@ -186,27 +195,86 @@ class CobraFlexDriver(Node):
         """Handle velocity commands"""
         self.last_cmd_time = self.get_clock().now()
         
-        linear = msg.linear.x
-        angular = msg.angular.z
+        linear = msg.linear.x  # m/s
+        angular = msg.angular.z  # rad/s
         
-        # Convert to motor commands (adjust scaling for your robot)
-        max_linear = 1.0  # m/s
-        max_angular = 2.0  # rad/s
+        # Convert twist to differential drive wheel velocities
+        # Using differential drive kinematics: v_left = v - (w * L / 2), v_right = v + (w * L / 2)
+        v_left = linear - (angular * self.WHEEL_BASE / 2.0)
+        v_right = linear + (angular * self.WHEEL_BASE / 2.0)
         
-        linear_cmd = int((linear / max_linear) * 100)
-        angular_cmd = int((angular / max_angular) * 100)
+        # Convert from m/s to rpm: rpm = (v / (2 * pi * r)) * 60
+        left_rpm = (v_left / (2 * math.pi * self.WHEEL_RADIUS)) * 60.0
+        right_rpm = (v_right / (2 * math.pi * self.WHEEL_RADIUS)) * 60.0
         
-        # Clamp
-        linear_cmd = max(-100, min(100, linear_cmd))
-        angular_cmd = max(-100, min(100, angular_cmd))
+        # Convert to 0.1rpm units as per protocol (range: -1800 to 1800 means -180 to 180 rpm)
+        left_speed = int(left_rpm * 10)
+        right_speed = int(right_rpm * 10)
         
+        # Clamp to protocol limits (-1800 to 1800, which is -180 to 180 rpm)
+        left_speed = max(-1800, min(1800, left_speed))
+        right_speed = max(-1800, min(1800, right_speed))
+        
+        # Send command with T=1 for speed control, L=left wheel, R=right wheel
         vel_cmd = {
-            "T": 1,  # Motion control
-            "L": linear_cmd,
-            "R": angular_cmd
+            "T": 1,
+            "L": left_speed,
+            "R": right_speed
         }
         
         self.send_json_command(vel_cmd)
+    
+    def send_individual_motor_command(self, m1: int, m2: int, m3: int, m4: int):
+        """
+        Send individual motor control command (T=11)
+        
+        Args:
+            m1: Left front wheel speed in 0.1rpm units (-1800 to 1800)
+            m2: Right front wheel speed in 0.1rpm units (-1800 to 1800)
+            m3: Right rear wheel speed in 0.1rpm units (-1800 to 1800)
+            m4: Left rear wheel speed in 0.1rpm units (-1800 to 1800)
+        """
+        motor_cmd = {
+            "T": 11,
+            "M1": max(-1800, min(1800, m1)),
+            "M2": max(-1800, min(1800, m2)),
+            "M3": max(-1800, min(1800, m3)),
+            "M4": max(-1800, min(1800, m4))
+        }
+        self.send_json_command(motor_cmd)
+    
+    def request_feedback(self):
+        """Request feedback from robot (T=130)"""
+        feedback_cmd = {"T": 130}
+        self.send_json_command(feedback_cmd)
+    
+    def set_continuous_feedback(self, enabled: bool):
+        """
+        Enable or disable continuous feedback (T=131)
+        
+        Args:
+            enabled: True to enable continuous feedback, False to disable
+        """
+        continuous_cmd = {
+            "T": 131,
+            "cmd": 1 if enabled else 0
+        }
+        self.send_json_command(continuous_cmd)
+    
+    def set_led_brightness(self, front_led: int, rear_led: int):
+        """
+        Set LED brightness (T=132)
+        
+        Args:
+            front_led: Front LED brightness (0-255)
+            rear_led: Rear LED brightness (0-255)
+        """
+        led_cmd = {
+            "T": 132,
+            "IO1": max(0, min(255, front_led)),
+            "IO2": max(0, min(255, rear_led))
+        }
+        self.send_json_command(led_cmd)
     
     def read_serial_timer(self):
         """Read serial data from ESP32"""
@@ -227,33 +295,76 @@ class CobraFlexDriver(Node):
         try:
             data = json.loads(json_str)
             
+            # Check if this is a feedback response (T=1001)
+            if "T" in data and data["T"] == 1001:
+                # Parse motor speeds (M1-M4) in 0.1rpm units
+                if "M1" in data:
+                    # M1 = left front, M2 = right front, M3 = right rear, M4 = left rear
+                    # Convert from 0.1rpm to rad/s: rad/s = (rpm / 60) * 2 * pi
+                    m1_rpm = data.get("M1", 0) / 10.0  # Convert from 0.1rpm to rpm
+                    m2_rpm = data.get("M2", 0) / 10.0
+                    m3_rpm = data.get("M3", 0) / 10.0
+                    m4_rpm = data.get("M4", 0) / 10.0
+                    
+                    # Assign to wheel velocities matching joint state order:
+                    # [0] = front_left (M1), [1] = front_right (M2), 
+                    # [2] = rear_left (M4), [3] = rear_right (M3)
+                    self.robot_state.wheel_velocities[0] = (m1_rpm / 60.0) * 2 * math.pi
+                    self.robot_state.wheel_velocities[1] = (m2_rpm / 60.0) * 2 * math.pi
+                    self.robot_state.wheel_velocities[2] = (m4_rpm / 60.0) * 2 * math.pi  # rear left
+                    self.robot_state.wheel_velocities[3] = (m3_rpm / 60.0) * 2 * math.pi  # rear right
+                
+                # Parse odometry data (odl, odr) in cm
+                if "odl" in data and "odr" in data:
+                    odl_cm = data["odl"]
+                    odr_cm = data["odr"]
+                    # Convert cm to meters and then to wheel positions in radians
+                    # position_rad = distance_m / wheel_radius
+                    # odl = left wheel distance, odr = right wheel distance
+                    # Assign to match joint state order:
+                    # [0] = front_left (left), [1] = front_right (right),
+                    # [2] = rear_left (left), [3] = rear_right (right)
+                    self.robot_state.wheel_positions[0] = (odl_cm / 100.0) / self.WHEEL_RADIUS  # front left
+                    self.robot_state.wheel_positions[1] = (odr_cm / 100.0) / self.WHEEL_RADIUS  # front right
+                    self.robot_state.wheel_positions[2] = (odl_cm / 100.0) / self.WHEEL_RADIUS  # rear left
+                    self.robot_state.wheel_positions[3] = (odr_cm / 100.0) / self.WHEEL_RADIUS  # rear right
+                
+                # Parse battery voltage (unit may vary by firmware version)
+                if "v" in data:
+                    # Assuming the value is in decivolts or similar small unit
+                    # Example: v=1173 represents 11.73V
+                    self.robot_state.battery_voltage = data["v"] / 100.0
+                
+                self.update_odometry()
+            
+            # Legacy format support (for backwards compatibility)
             # Update encoder data
-            if "encoder" in data and len(data["encoder"]) == 4:
+            elif "encoder" in data and len(data["encoder"]) == 4:
                 counts_per_rev = 1440
                 for i, count in enumerate(data["encoder"]):
                     self.robot_state.wheel_positions[i] = (
                         (count / counts_per_rev) * 2 * math.pi
                     )
-            
-            # Update velocities
-            if "velocity" in data and len(data["velocity"]) == 4:
-                self.robot_state.wheel_velocities = data["velocity"]
-            
-            # Update IMU
-            if "imu" in data:
-                imu = data["imu"]
-                if "gyro" in imu:
-                    self.robot_state.imu_angular_velocity = imu["gyro"]
-                if "accel" in imu:
-                    self.robot_state.imu_linear_acceleration = imu["accel"]
-                if "orientation" in imu:
-                    self.robot_state.imu_orientation = imu["orientation"]
-            
-            # Battery
-            if "battery" in data:
-                self.robot_state.battery_voltage = data["battery"]
-            
-            self.update_odometry()
+                
+                # Update velocities
+                if "velocity" in data and len(data["velocity"]) == 4:
+                    self.robot_state.wheel_velocities = data["velocity"]
+                
+                # Update IMU
+                if "imu" in data:
+                    imu = data["imu"]
+                    if "gyro" in imu:
+                        self.robot_state.imu_angular_velocity = imu["gyro"]
+                    if "accel" in imu:
+                        self.robot_state.imu_linear_acceleration = imu["accel"]
+                    if "orientation" in imu:
+                        self.robot_state.imu_orientation = imu["orientation"]
+                
+                # Battery
+                if "battery" in data:
+                    self.robot_state.battery_voltage = data["battery"]
+                
+                self.update_odometry()
             
         except json.JSONDecodeError:
             self.get_logger().debug(f'Invalid JSON: {json_str[:50]}')
