@@ -171,28 +171,78 @@ ros2 run tf2_ros tf2_echo odom base_link
 
 ## JSON Protocol
 
+The driver uses the Waveshare JSON communication protocol documented at:
+https://www.waveshare.com/wiki/Cobra_Flex#JSON_Communication_Protocol
+
 ### Commands to ESP32
 
-**Velocity Command:**
+**Movement Command (T=1):**
+Controls left and right wheel speeds.
 ```json
 {
   "T": 1,
-  "L": 50,    // Linear command (-100 to 100)
-  "R": 0      // Angular command (-100 to 100)
+  "L": 100,    // Left wheel speed in 0.1rpm units (0-1800, positive=forward)
+  "R": 100     // Right wheel speed in 0.1rpm units (0-1800, positive=forward)
 }
 ```
 
-**Configuration Command:**
+**Individual Motor Control (T=11):**
+Controls each wheel independently.
 ```json
 {
-  "T": 900,
-  "main": 4,   // Robot type
-  "module": 0  // Module type
+  "T": 11,
+  "M1": 1000,  // Left front wheel in 0.1rpm units (-1800 to 1800)
+  "M2": 1000,  // Right front wheel in 0.1rpm units (-1800 to 1800)
+  "M3": 1000,  // Right rear wheel in 0.1rpm units (-1800 to 1800)
+  "M4": 1000   // Left rear wheel in 0.1rpm units (-1800 to 1800)
+}
+```
+
+**Request Feedback (T=130):**
+Requests a single feedback response from the robot.
+```json
+{
+  "T": 130
+}
+```
+
+**Continuous Feedback Control (T=131):**
+Enables or disables continuous feedback mode.
+```json
+{
+  "T": 131,
+  "cmd": 1     // 1=enable continuous feedback, 0=disable
+}
+```
+
+**LED Control (T=132):**
+Controls LED brightness.
+```json
+{
+  "T": 132,
+  "IO1": 255,  // Front LED brightness (0-255)
+  "IO2": 255   // Rear LED brightness (0-255)
 }
 ```
 
 ### Expected Responses from ESP32
 
+**Feedback Response (T=1001):**
+```json
+{
+  "T": 1001,
+  "M1": 0,      // Left front wheel speed in 0.1rpm units
+  "M2": 0,      // Right front wheel speed in 0.1rpm units
+  "M3": 0,      // Right rear wheel speed in 0.1rpm units
+  "M4": 0,      // Left rear wheel speed in 0.1rpm units
+  "odl": 0,     // Left wheel odometry in cm
+  "odr": 0,     // Right wheel odometry in cm
+  "v": 1173     // Battery voltage
+}
+```
+
+**Legacy Format (for backwards compatibility):**
+The driver also supports the legacy format for compatibility with older firmware.
 ```json
 {
   "encoder": [fl, fr, rl, rr],  // Encoder counts
