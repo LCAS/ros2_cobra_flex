@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>cobra_flex_driver</name>
+  <version>0.1.0</version>
+  <description>ROS2 driver for Waveshare Cobra Flex chassis with JSON serial communication</description>
+  
+  <maintainer email="your.email@example.com">Your Name</maintainer>
+  <license>GPL-3.0</license>
+  
+  <author email="your.email@example.com">Your Name</author>
+  
+  <url type="website">https://www.waveshare.com/cobra-flex.htm</url>
+  <url type="repository">https://github.com/your-username/cobra_flex_driver</url>
+  <url type="bugtracker">https://github.com/your-username/cobra_flex_driver/issues</url>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <!-- Python dependencies -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
+  
+  <!-- ROS2 message dependencies -->
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  
+  <!-- Launch dependencies -->
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  
+  <!-- Testing dependencies -->
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
